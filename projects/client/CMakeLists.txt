@@ -59,7 +59,7 @@ else()
 endif()
 
 if (M2O_CEF)
-    message("-- M2O_CEF enabled, linking with CEF ...")
+    message(STATUS "M2O_CEF enabled, linking with CEF ...")
 
     set(LIBRARY_FOLDERS ${LIBRARY_FOLDERS} ${PROJECT_SOURCE_DIR}/../../vendor/cef/)
     set(INCLUDE_FOLDERS ${INCLUDE_FOLDERS}
@@ -90,7 +90,7 @@ if (MSVC)
     add_custom_command(
         TARGET client
         POST_BUILD
-        COMMAND "${CMAKE_MT}" -manifest "${PROJECT_SOURCE_DIR}\\manifest.xml" -outputresource:"${CMAKE_SOURCE_DIR}/binary/client/m2o-client.dll"\;\#2
+        COMMAND "mt.exe" -manifest "${PROJECT_SOURCE_DIR}\\manifest.xml" -outputresource:"${CMAKE_SOURCE_DIR}/binary/client/m2o-client.dll"\;\#2
         COMMENT "Adding manifest..."
     )
 
