@@ -1,5 +1,11 @@
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.15)
+cmake_policy(SET CMP0091 NEW)
 project (m2o-reborn)
+
+# Mafia II Classic is a 32-bit game, so the client DLL must be 32-bit too.
+if (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "Mafia II Classic is 32-bit. Generate with -A Win32 (see generate-vs2022.bat).")
+endif()
 
 if (CMAKE_BINARY_DIR STREQUAL CMAKE_SOURCE_DIR)
     message(FATAL_ERROR "Please select another Build Directory ! (and give it a clever name, like bin_Visual2012_64bits/)")
@@ -11,11 +17,13 @@ if (CMAKE_BINARY_DIR MATCHES " ")
     message("Your Build Directory contains spaces. If you experience problems when compiling, this can be the cause.")
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Prebuilt vendor libs (m2sdk, detours, SDL...) use the static release CRT in every config.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 
 if(MSVC)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MT /Zi" CACHE STRING "Debug compiler flags" FORCE)
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /Zi" CACHE STRING "Release compiler flags" FORCE)
+    add_compile_options(/Zi /MP /D_CRT_SECURE_NO_WARNINGS /D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS)
     set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF /ignore:4099")
     set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
 

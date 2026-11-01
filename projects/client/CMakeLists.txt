@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.15)
 project(client)
 
 file(GLOB_RECURSE FILES
@@ -90,7 +90,7 @@ if (MSVC)
     add_custom_command(
         TARGET client
         POST_BUILD
-        COMMAND "mt.exe" -manifest "${PROJECT_SOURCE_DIR}\\manifest.xml" -outputresource:"${CMAKE_SOURCE_DIR}/binary/client/m2o-client.dll"\;\#2
+        COMMAND "${CMAKE_MT}" -manifest "${PROJECT_SOURCE_DIR}\\manifest.xml" -outputresource:"${CMAKE_SOURCE_DIR}/binary/client/m2o-client.dll"\;\#2
         COMMENT "Adding manifest..."
     )
 

@@ -1,3 +1,26 @@
+# Mafia II Co-op (fork of m2o-reborn)
+
+This fork is the starting point for a **2-player co-op campaign mod for Mafia II Classic (Steam, 32-bit)**.
+It builds on the archived Mafia 2 Online "reborn" code (Apache-2.0) and the bundled m2sdk.
+
+## Building (Windows)
+
+1. Install Visual Studio 2022 with the **Desktop development with C++** workload, and CMake 3.15+.
+2. Run `generate-vs2022.bat` from the repo root. It creates a **32-bit (Win32)** solution in `build/`.
+3. Open `build\m2o-reborn.sln`, choose **Release**, and build.
+4. Outputs land in `binary/client/` (`m2o-client.dll`, `m2o-launcher.exe`) and `binary/server/`.
+
+Both players must run the identical Steam Classic `mafia2.exe`; all addresses in m2sdk target that build.
+
+## Plan
+
+1. Two players in free roam (on-foot + vehicle sync) - inherited from m2o-reborn.
+2. Host-owned NPCs and damage forwarded from the guest.
+3. Guest loads the same chapter with mission scripts suppressed; synced cutscene start.
+4. One mission fully co-op, then generalise across chapters.
+
+---
+
 <div align="center">
     <a href="https://github.com/mafia2online/m2o-reborn"><img src="https://user-images.githubusercontent.com/2182108/46598345-7a6f3080-caec-11e8-9204-64ab4a8ba591.png" alt="Mafia 2 Online" /></a>
 </div>
