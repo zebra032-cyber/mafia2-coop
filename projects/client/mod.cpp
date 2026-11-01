@@ -148,6 +148,43 @@ void mod_install() {
     });
 }
 
+
+// Reads "host:port" from server.txt next to m2o-client.dll; falls back to localhost:27010.
+static void mod_read_server_address(std::string &host, int &port) {
+    host = "localhost";
+    port = 27010;
+
+    char dll_path[MAX_PATH] = { 0 };
+    HMODULE self = NULL;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)&mod_read_server_address, &self);
+    GetModuleFileNameA(self, dll_path, MAX_PATH);
+
+    std::string path(dll_path);
+    path = path.substr(0, path.rfind('\\')) + "\\server.txt";
+
+    FILE *f = fopen(path.c_str(), "r");
+    if (!f) {
+        mod_log("[info] no server.txt found, using %s:%d\n", host.c_str(), port);
+        return;
+    }
+
+    char line[256] = { 0 };
+    if (fgets(line, sizeof(line), f)) {
+        std::string value(line);
+        while (!value.empty() && (value.back() == '\n' || value.back() == '\r' || value.back() == ' ')) value.pop_back();
+        auto colon = value.rfind(':');
+        if (colon != std::string::npos) {
+            host = value.substr(0, colon);
+            port = atoi(value.substr(colon + 1).c_str());
+        } else if (!value.empty()) {
+            host = value;
+        }
+    }
+    fclose(f);
+    mod_log("[info] server.txt: connecting to %s:%d\n", host.c_str(), port);
+}
+
 void mod_connect(const char *host, int port) {
     librg_address_t addr = { port, (char *)host };
     librg_network_start(ctx, addr);
@@ -387,7 +424,9 @@ void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
 
     /* connect to the server */
     if (input_key_down(VK_F5) && !mod.spawned) {
-        mod_connect("localhost", 27010);
+        std::string host; int port;
+        mod_read_server_address(host, port);
+        mod_connect(host.c_str(), port);
         mod.spawned = true;
     }
 

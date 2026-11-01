@@ -12,6 +12,19 @@ It builds on the archived Mafia 2 Online "reborn" code (Apache-2.0) and the bund
 
 Both players must run the identical Steam Classic `mafia2.exe`; all addresses in m2sdk target that build.
 
+## First test run (single PC)
+
+The client boots Mafia II into a free-ride world (it overrides a few game files in memory via `binary/client/files`; your install is not modified).
+
+1. Start `binary\server\m2o-server.exe` (allow it through Windows Firewall when asked).
+2. Make sure Steam is running, then start `binary\client\m2o-launcher.exe`. It finds Mafia II through Steam, launches `pc\mafia2.exe` and injects `m2o-client.dll`.
+3. In game, press **F5** to connect. F1 toggles the mouse.
+4. Logs: `binary\client\debug.log`, crash dumps in `binary\client\exceptions\`.
+
+### Playing across two PCs
+
+Edit `binary\client\server.txt` on the guest PC to the host's address, e.g. `192.168.1.20:27010`. The host forwards/opens **UDP 27010** if connecting over the internet.
+
 ## Plan
 
 1. Two players in free roam (on-foot + vehicle sync) - inherited from m2o-reborn.
