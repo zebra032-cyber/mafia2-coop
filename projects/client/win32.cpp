@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <clocale>
 #include <unordered_map>
+#include <string>
 
 #include "zpl.h"
 #include "zpl_math.h"
