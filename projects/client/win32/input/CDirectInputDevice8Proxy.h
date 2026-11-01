@@ -167,7 +167,7 @@ HRESULT APIENTRY CDirectInputDevice8Proxy::GetDeviceState(DWORD cbData, LPVOID l
         }
 
         if (m_DeviceType == DIDEVICE_TYPE_KEYBOARD) {
-            if (_input_state.blocked) {
+            if (_input_state.blocked || _input_state.keys_blocked) {
                 for (usize i = 0; i < 256; i++) {
                     ((mod_di_keys_t*)lpvData)->state[i] = 0;
                 }

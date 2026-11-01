@@ -25,6 +25,7 @@ struct input_state {
 
     bool installed;
     bool blocked;
+    bool keys_blocked;
 
     CDirectInputDevice8Proxy* devices[4];
 
@@ -137,6 +138,10 @@ void input_block_set(bool value) {
     else {
         while (_input_state.hooked_showcursor(false) >= 0) {}
     }
+}
+
+void input_keys_block_set(bool value) {
+    _input_state.keys_blocked = value;
 }
 
 bool input_block_get() {

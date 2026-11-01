@@ -3,6 +3,42 @@
 
 #include "vehicle/interp.h"
 
+/* car we last drove and when we got out: keep treating it as ours for a few seconds so
+ * network updates don't move the car while the get-out animation still has us attached */
+static librg_entity_id m2o_last_driven_car = M2O_INVALID_ENTITY;
+static f64 m2o_last_exit_time = 0;
+#define M2O_CAR_EXIT_GRACE 3.0
+
+/* is the local player currently driving this car entity (or just got out of it)? */
+static bool m2o_local_is_driver_of(librg_entity_id car_id) {
+    if (!mod.player) return false;
+    if (car_id == m2o_last_driven_car && zpl_time_now() - m2o_last_exit_time < M2O_CAR_EXIT_GRACE) return true;
+    auto me = m2o_ped_get(mod.player);
+    return me && me->state == PED_IN_CAR && me->vehicle == car_id && me->seat == M2::E_SEAT_DRIVER;
+}
+
+/* id of the remote player driving this car entity, or M2O_INVALID_ENTITY */
+static librg_entity_id m2o_car_remote_driver(librg_entity_id car_id) {
+    librg_entity_id found = M2O_INVALID_ENTITY;
+    mod_entity_iterate(ctx, LIBRG_ENTITY_ALIVE, [&](librg_entity_t *entity) {
+        if (entity->type != M2O_ENTITY_PLAYER_PED || entity == mod.player) return;
+        auto ped = m2o_ped_get(entity);
+        if (ped && ped->state == PED_IN_CAR && ped->vehicle == car_id && ped->seat == M2::E_SEAT_DRIVER) found = entity->id;
+    });
+    return found;
+}
+
+/* librg entity id for a game car pointer, or M2O_INVALID_ENTITY */
+static librg_entity_id m2o_car_find_entity(void *game_car) {
+    librg_entity_id found = M2O_INVALID_ENTITY;
+    mod_entity_iterate(ctx, LIBRG_ENTITY_ALIVE, [&](librg_entity_t *entity) {
+        if (entity->type != M2O_ENTITY_CAR) return;
+        auto car = m2o_car_get(entity);
+        if (car && (void *)car->CEntity == game_car) found = entity->id;
+    });
+    return found;
+}
+
 // =======================================================================//
 // !
 // ! Generic entity events
@@ -71,6 +107,13 @@ void m2o_callback_car_update(librg_event_t *event) {
     mod_assert(car && car->CEntity);
     librg_data_rptr(event->data, &car->stream, sizeof(car->stream));
 
+    /* we are driving it: our own simulation is the truth, don't let stale updates fight the steering */
+    if (m2o_local_is_driver_of(event->entity->id)) {
+        car->interp.pos.finishTime = 0;
+        car->interp.rot.finishTime = 0;
+        return;
+    }
+
     // car->CCar->SetPos(event->entity->position);
     // car->CCar->SetRot(car->stream.rotation);
 
@@ -124,15 +167,14 @@ void m2o_callback_car_interpolate(librg_entity_t *entity) {
         return;
     }
 
-    // if (player_ped->vehicle != entity->id) {
+    if (!m2o_local_is_driver_of(entity->id)) {
         m2o_car_target_position_update(car);
         m2o_car_target_rotation_update(car);
-    // }
-    // else {
-    //     // Otherwize make sure we have no interpolation stuff stored
-    //     car->interp.pos.finishTime = 0;
-    //     car->interp.rot.finishTime = 0;
-    // }
+    } else {
+        /* we drive this car: drop any pending interpolation so it can't pull the car back */
+        car->interp.pos.finishTime = 0;
+        car->interp.rot.finishTime = 0;
+    }
 }
 
 void m2o_car_callbacks_init() {
@@ -178,6 +220,11 @@ void m2o_car_callbacks_init() {
 
         /* force remove driving if we are */
         mod.player->flags &= ~M2O_ENTITY_DRIVER;
+
+        if (ped->seat == M2::E_SEAT_DRIVER) {
+            m2o_last_driven_car = ped->vehicle;
+            m2o_last_exit_time  = zpl_time_now();
+        }
 
         ped->seat    = 0;
         ped->vehicle = M2O_INVALID_ENTITY;

@@ -29,6 +29,7 @@ void* CIE_Alloc(size_t siz) {
 #include "mod/vehicle.h"
 #include "mod/pedestrian.h"
 #include "mod/luadev.h"
+#include "mod/debugmenu.h"
 
 // =======================================================================//
 // !
@@ -83,7 +84,17 @@ void mod_install() {
     });
 
     M2::AttachHandler(M2_EVENT_CAR_ENTER_REQUEST, [](m2sdk_event *data) {
-        data->arg5 = (void *)true;
+        /* any player may take a vacant car; but if another player is already driving it,
+         * don't let the game put us in the driver seat on top of them (use G for passenger) */
+        bool allowed = true;
+        if (ctx && mod.player) {
+            auto id = m2o_car_find_entity(data->arg1);
+            if (id != M2O_INVALID_ENTITY && m2o_car_remote_driver(id) != M2O_INVALID_ENTITY) {
+                allowed = false;
+                mod_log("[info] car %u already has a driver - press G to ride as passenger\n", id);
+            }
+        }
+        data->arg5 = (void *)allowed;
     });
 
     M2::AttachHandler(M2_EVENT_CAR_HOOD_OPEN_REQUEST, [](m2sdk_event *data) {
@@ -441,7 +452,7 @@ void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
     });
 
     // constnaly set our health to top (DEBUG)
-    if (mod.player) {
+    if (mod.player && debugmenu_godmode()) {
         ((M2::C_Human2 *)M2::C_Game::Get()->GetLocalPed())->GetScript()->SetHealth(720.0f);
     }
 
@@ -461,8 +472,32 @@ void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
 
     /* dev: ask the server to spawn a synced car next to us (both players see it) */
     if (input_key_down(VK_F10) && mod_connected()) {
-        mod_log("[diag] F10: requesting a car from the server\n");
-        mod_message_send(ctx, M2O_CAR_CREATE, nullptr);
+        u16 model = (u16)debugmenu_car_model();
+        mod_log("[diag] F10: requesting car model %u from the server\n", model);
+        mod_message_send(ctx, M2O_CAR_CREATE, [&](librg_data_t *data) { librg_data_wu16(data, model); });
+    }
+
+    /* G: get into the nearest car (within 6 m) as front passenger */
+    if (input_key_down('G') && mod_connected() && mod.player) {
+        auto me = m2o_ped_get(mod.player);
+        if (me && me->CEntity && me->state == PED_ON_GROUND) {
+            auto my_pos = me->CEntity->GetPosition();
+            m2o_car *nearest = nullptr; f32 best = zplm_square(6.0f);
+            mod_entity_iterate(ctx, LIBRG_ENTITY_ALIVE, [&](librg_entity_t *entity) {
+                if (entity->type != M2O_ENTITY_CAR) return;
+                auto car = m2o_car_get(entity);
+                if (!car || !car->CEntity) return;
+                f32 d = zplm_vec3_mag2(car->CEntity->GetPosition() - my_pos);
+                if (d < best) { best = d; nearest = car; }
+            });
+            if (nearest) {
+                mod_log("[info] G: entering nearest car as passenger\n");
+                M2::C_SyncObject *sync = nullptr;
+                me->CHuman->GetScript()->ScrDoAction(&sync, (M2::C_Vehicle *)nearest->CEntity, true, M2::E_SEAT_PASSENGER_FRONT, 0);
+            } else {
+                mod_log("[info] G: no car within 6 m\n");
+            }
+        }
     }
 
     /* dev: run binary/client/test.lua in the game's Lua VM */
@@ -515,15 +550,6 @@ void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
         }
     }
 
-    if (GetAsyncKeyState(VK_F7) & 0x1) {
-        reinterpret_cast<M2::C_Human2*>(M2::C_Game::Get()->GetLocalPed())->GetInventory()->AddWeapon(12, 120);
-    }
-
-    if (GetAsyncKeyState(VK_F6) & 0x1) {
-        M2::Wrappers::Dialogs::ShowQuestDialog();
-    }
-
-    if (input_key_down(VK_F9) & 0x1) {
-        M2::Wrappers::lua::Execute("game.gui:ShowQuestDialog(\"pinup01_ps\",\"Text1\",\"\Text2\",\"Text3\")");
-    }
+    /* old F6 (quest dialog), F7 (weapon) and F9 (quest dialog) test keys replaced by the F6 debug menu */
+    debugmenu_tick();
 }

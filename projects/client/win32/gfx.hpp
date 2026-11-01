@@ -306,7 +306,7 @@ static zpl_mutex gfx_lock;
     int gfx_exists(gfx_handle handle) {
         zpl_mutex_lock(&gfx_lock);
 
-        if (handle >= 0 && handle > zpl_array_capacity(gfx_state.objects)) {
+        if (handle < 0 || handle >= zpl_array_capacity(gfx_state.objects)) {
             zpl_mutex_unlock(&gfx_lock);
             return 0;
         }
@@ -343,6 +343,9 @@ static zpl_mutex gfx_lock;
         }
 
         gfx_state.objects[handle].valid = 0;
+        if (zpl_array_count(gfx_state.objects) > 0) {
+            zpl_array_count(gfx_state.objects)--; /* was never decremented, so the array kept growing */
+        }
         zpl_mutex_unlock(&gfx_lock);
         return 0;
     }
@@ -444,9 +447,21 @@ static zpl_mutex gfx_lock;
         return 0;
     }
 
+    static void (*gfx__before_draw_cb)() = nullptr;
+
+    /* run cb on the render thread right before each overlay draw: the only safe place
+     * to create/destroy text, because the SDL renderer is not thread-safe */
+    void gfx_before_draw_set(void (*cb)()) {
+        gfx__before_draw_cb = cb;
+    }
+
     int gfx_render_draw() {
         if (!gfx_state.rnd) {
             return -1;
+        }
+
+        if (gfx__before_draw_cb) {
+            gfx__before_draw_cb();
         }
 
         //mod_log("gfx_render_draw");
@@ -671,7 +686,9 @@ static zpl_mutex gfx_lock;
         gfx_state.method = (gfx_d3dcreate9_cb)(Mem::Hooks::InstallDetourPatch("d3d9.dll", "Direct3DCreate9", (DWORD)gfx_d3dcreate9_hook));
 
         TTF_Init();
-        zpl_array_init_reserve(gfx_state.objects, zpl_heap(), 4);
+        /* reserve plenty up front: growing this array moves it in memory while other code
+         * may still hold pointers into it */
+        zpl_array_init_reserve(gfx_state.objects, zpl_heap(), 1024);
         zpl_array_init(gfx_state.queue, zpl_heap());
         zpl_mutex_init(&gfx_lock);
 

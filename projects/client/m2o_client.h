@@ -76,6 +76,8 @@ extern "C" {
     int gfx_visible_get(gfx_handle handle);
     int gfx_visible_set(gfx_handle handle, int value);
 
+    void gfx_before_draw_set(void (*cb)());
+
     void gfx_util_screensize(int *w, int *h);
     void gfx_util_screen2world(vec3 screen, vec3 *world);
     void gfx_util_world2screen(vec3 world, vec3 *screen);
@@ -137,6 +139,7 @@ extern "C" {
 
     void input_mouse_position(int *x, int *y);
     bool input_key_down(unsigned int key);
+    void input_keys_block_set(bool value); /* hide keyboard from the game (mouse untouched) */
 
 #ifdef __cplusplus
 }
