@@ -9,6 +9,7 @@
 #define M2O_PED_HEALTHBAR_HEIGH     12
 #define M2O_PED_HEALTHBAR_MARGIN    32 /* margin from the nickname */
 #define M2O_PED_HEALTHBAR_PADDING   1  /* internal border padding */
+#define M2O_PED_MOVE_IDLE           0xFF /* stream.move value meaning "standing still" */
 
 /**
  * The entity enters the stream zone
@@ -161,38 +162,38 @@ void m2o_callback_ped_update(librg_event_t *event) {
     //     }
     // }
 
-    /* ped tasks late-init (sync init right after ped creation causes crash sometimes) */
+    /* ped tasks late-init (driving the ped right after creation causes crashes sometimes) */
     if (!ped->tasks.init && ++ped->tasks.counter > 20) {
-        ped->tasks.init = true;
-        mod_log("[info] calling late init for ped tasks...");
-
-
-        /* Init move command */
-        ped->tasks.movedir = (M2::C_Command*)CIE_Alloc(sizeof(M2::S_HumanCommandMoveDir));
-        *(uintptr_t*)ped->tasks.movedir = 0x19661BC;
-        ped->tasks.movedir->countUsed = 1;
-
-        ped->CHuman->AddCommand(M2::E_Command::COMMAND_MOVEDIR, ped->tasks.movedir);
-
-        /* Tag the first command the player will use */
-        ped->CHuman->m_aCommandsArray[ped->CHuman->m_iNextCommand].m_pCommand = ped->tasks.movedir;
+        ped->tasks.init        = true;
+        ped->tasks.move        = nullptr;
+        ped->tasks.move_target = vec3f(0, 0, -1000.0f); /* force the first move */
+        ped->tasks.move_mode   = 0;
+        mod_log("[info] ped %u ready for movement sync\n", entity->id);
     }
 
+    /* Move the remote ped with the game's own scripted movement (ScrMoveV), like a
+     * mission script would. The old hand-built move command crashed at mafia2.exe+0x22D46
+     * whenever the ped got pushed (punches, cars). The game walks/runs/stops the ped to the
+     * target itself, so the animation matches; interpolation only snaps it if it drifts. */
     if (ped->state == PED_ON_GROUND && ped->tasks.init) {
-        auto pos_diff = zplm_vec3_mag2(ped->interp.pos.target - entity->position);
+        bool idle = ped->stream.move == M2O_PED_MOVE_IDLE;
+        u8 mode   = idle ? (u8)M2::HUMAN_MOVE_MODE_WALK
+                         : (u8)zpl_clamp((int)ped->stream.move, (int)M2::HUMAN_MOVE_MODE_STEP, (int)M2::HUMAN_MOVE_MODE_SPRINT);
 
-        if (pos_diff > 0) {
-            auto cmd = (M2::S_HumanCommandMoveDir *)ped->tasks.movedir; {
-                cmd->speedMultiplier = 1.0f;
-                cmd->moveSpeed = ped->stream.move;
-                cmd->potentialMoveVector = { ped->stream.dirx, ped->stream.diry };
-            }
+        vec3 target  = entity->position;
+        f32  changed = zplm_vec3_mag2(target - ped->tasks.move_target);
 
-            ped->CHuman->m_iNextCommand = 1;
-            ped->CHuman->m_aCommandsArray[1].m_pCommand = ped->tasks.movedir;
-        } else {
-            // ped->CHuman->m_iCurrentCommand = 0;
-            // ped->CHuman->m_aCommandsArray[0].m_pCommand = ped->tasks.stand;
+        if (changed > zplm_square(0.05f) || mode != ped->tasks.move_mode) {
+            ped->tasks.move_target = target;
+            ped->tasks.move_mode   = mode;
+
+            ped->CHuman->GetScript()->ScrMoveV(
+                &ped->tasks.move,
+                vec3f(target.x, target.y, target.z),
+                (M2::eHumanMoveMode)mode,
+                vec3f(ped->stream.dirx, ped->stream.diry, 0.0f),
+                true /* smooth stop at the target */
+            );
         }
     }
 
@@ -243,11 +244,11 @@ void m2o_callback_ped_clientstream(librg_event_t *event) {
 
         // convert local player movement to human movement
         switch (movestate) {
-            case M2::E_MOVEMENT_WALK:     ped->stream.move = 0; break;
-            case M2::E_MOVEMENT_JOG:      ped->stream.move = 1; break;
-            case M2::E_MOVEMENT_SPRINT:   ped->stream.move = 2; break;
-            // case M2::E_MOVEMENT_IDLE:     ped->stream.move = M2::HUMAN_MOVE_MODE_BREATH; break;
-            // case M2::E_MOVEMENT_STOPPING: ped->stream.move = M2::HUMAN_MOVE_MODE_END; break;
+            case M2::E_MOVEMENT_WALK:     ped->stream.move = (u8)M2::HUMAN_MOVE_MODE_WALK;   break;
+            case M2::E_MOVEMENT_JOG:      ped->stream.move = (u8)M2::HUMAN_MOVE_MODE_RUN;    break;
+            case M2::E_MOVEMENT_SPRINT:   ped->stream.move = (u8)M2::HUMAN_MOVE_MODE_SPRINT; break;
+            /* idle, stopping, anything else: tell the others we're standing still */
+            default:                      ped->stream.move = M2O_PED_MOVE_IDLE; break;
         }
     }
 
@@ -292,7 +293,20 @@ void m2o_callback_ped_interpolate(librg_entity_t *entity) {
         ped->interp.pos.finishTime = 0;
     }
 
-    ped->CHuman->SetPos(compensation);
+    if (ped->state == PED_IN_CAR) {
+        /* body is parked out of the way while its owner drives (seat sync is TODO) */
+        gfx_visible_set(ped->nickname_value,  false);
+        gfx_visible_set(ped->healthbar_base,  false);
+        gfx_visible_set(ped->healthbar_value, false);
+        return;
+    }
+
+    /* ScrMoveV walks the ped; only teleport if it is far off (spawn, car exit, lag) */
+    auto drift = zplm_vec3_mag2(ped->CEntity->GetPosition() - compensation);
+    if (!ped->tasks.init || drift > zplm_square(3.0f)) {
+        ped->CHuman->SetPos(compensation);
+        ped->tasks.move_target = vec3f(0, 0, -1000.0f); /* re-issue the move after a snap */
+    }
 
     // // last delta tick against constant tick delay
     // f32 alpha = ped->inter_delta / ctx->timesync.server_delay;

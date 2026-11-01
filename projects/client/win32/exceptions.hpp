@@ -16,21 +16,40 @@ void exception_writeln(zpl_file_t *file, const char* format, ...) {
     zpl_file_write(file, message, zpl_strlen(message));
 }
 
+void exception_log_memory(zpl_file_t *file) {
+    MEMORYSTATUSEX ms; ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) {
+        exception_writeln(file, "Virtual memory: %llu MB used of %llu MB (%llu MB free)\r\n",
+            (ms.ullTotalVirtual - ms.ullAvailVirtual) >> 20, ms.ullTotalVirtual >> 20, ms.ullAvailVirtual >> 20);
+    }
+}
+
 long WINAPI exception_callback(_EXCEPTION_POINTERS *pExceptionInfo) {
+    /* This is a vectored handler, so it sees every first-chance exception.
+     * Only record real errors (severity 0xC...); skip debug output (0x40010006),
+     * thread naming (0x406D1388), C++ throws the game catches (0xE06D7363), etc. */
+    DWORD code = pExceptionInfo->ExceptionRecord->ExceptionCode;
+    if ((code & 0xF0000000) != 0xC0000000) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    static volatile LONG exception_counter = 0;
+    LONG exception_index = InterlockedIncrement(&exception_counter);
+
     SYSTEMTIME systemTime;
     GetSystemTime(&systemTime);
     zpl_file_t file;
 
     char szFileName[MAX_PATH];
-    sprintf(szFileName, "%s\\%04d-%02d-%02d_%02d-%02d-%02d.txt", _exceptions_folder.c_str(),
+    sprintf(szFileName, "%s\\%04d-%02d-%02d_%02d-%02d-%02d-%03d_%02ld.txt", _exceptions_folder.c_str(),
         systemTime.wYear, systemTime.wMonth, systemTime.wDay,
-        systemTime.wHour, systemTime.wMinute, systemTime.wSecond
+        systemTime.wHour, systemTime.wMinute, systemTime.wSecond, systemTime.wMilliseconds, exception_index
     );
 
     HANDLE hModuleSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
 
     bool bFoundModule = false;
-    char szModuleName[MAX_MODULE_NAME32 + 1];
+    char szModuleName[MAX_MODULE_NAME32 + 1] = { 0 };
     DWORD dwAddressOfExceptionInModule = NULL;
 
     if (hModuleSnapShot) {
@@ -38,25 +57,23 @@ long WINAPI exception_callback(_EXCEPTION_POINTERS *pExceptionInfo) {
         ModuleEntry.dwSize = sizeof(ModuleEntry);
 
         if (Module32First(hModuleSnapShot, &ModuleEntry)) {
-            while(Module32Next(hModuleSnapShot, &ModuleEntry)) {
-                if ((pExceptionInfo->ContextRecord->Eip >= (DWORD)ModuleEntry.modBaseAddr) && (pExceptionInfo->ContextRecord->Eip <= ((DWORD)ModuleEntry.modBaseAddr + ModuleEntry.modBaseSize))) {
+            do {
+                if ((pExceptionInfo->ContextRecord->Eip >= (DWORD)ModuleEntry.modBaseAddr) && (pExceptionInfo->ContextRecord->Eip < ((DWORD)ModuleEntry.modBaseAddr + ModuleEntry.modBaseSize))) {
                     strcpy_s(szModuleName, MAX_MODULE_NAME32 + 1, ModuleEntry.szModule);
                     dwAddressOfExceptionInModule = (pExceptionInfo->ContextRecord->Eip - (DWORD)ModuleEntry.modBaseAddr);
                     bFoundModule = true;
                     break;
                 }
-            }
+            } while(Module32Next(hModuleSnapShot, &ModuleEntry));
         }
     }
 
-    if (!_stricmp(szModuleName, "KERNELBASE.dll")) {
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
-
-    mod_log("[exception] capturing the exception...\n");
+    mod_log("[exception] #%ld code 0x%08X at 0x%p (%s+0x%X)\n", exception_index, code,
+        pExceptionInfo->ExceptionRecord->ExceptionAddress, bFoundModule ? szModuleName : "?", dwAddressOfExceptionInModule);
 
     if (zpl_file_create(&file, szFileName) != ZPL_FILE_ERROR_NONE) {
-        return EXCEPTION_EXECUTE_HANDLER;
+        if (hModuleSnapShot) CloseHandle(hModuleSnapShot);
+        return EXCEPTION_CONTINUE_SEARCH;
     }
 
     exception_writeln(&file, "Exception at address: 0x%p\r\n", pExceptionInfo->ExceptionRecord->ExceptionAddress);
@@ -138,6 +155,8 @@ long WINAPI exception_callback(_EXCEPTION_POINTERS *pExceptionInfo) {
         default: exception_writeln(&file, "Exception code: %08x\r\n", pExceptionInfo->ExceptionRecord->ExceptionCode);
     }
 
+    exception_log_memory(&file);
+
     exception_writeln(&file, "\nRegisters:\r\n");
 
     if (pExceptionInfo->ContextRecord->ContextFlags & CONTEXT_SEGMENTS) {
@@ -170,7 +189,6 @@ long WINAPI exception_callback(_EXCEPTION_POINTERS *pExceptionInfo) {
 
         if (Module32First(hModuleSnapShot, &ModuleEntry)) {
             do {
-                if (ModuleEntry.szModule[0] != 'f' && ModuleEntry.szModule[1] != 'l' && ModuleEntry.szModule[2] != 'a')
                     exception_writeln(&file, "%s [B: 0x%08X, S: 0x%08X] (%s)\r\n", ModuleEntry.szModule, ModuleEntry.modBaseAddr, ModuleEntry.modBaseSize, ModuleEntry.szExePath);
             } while(Module32Next(hModuleSnapShot, &ModuleEntry));
         }
@@ -179,7 +197,8 @@ long WINAPI exception_callback(_EXCEPTION_POINTERS *pExceptionInfo) {
     }
 
     zpl_file_close(&file);
-    return EXCEPTION_EXECUTE_HANDLER;
+    /* let the game's own handlers (and Windows) deal with it as before */
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 

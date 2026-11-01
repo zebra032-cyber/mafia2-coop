@@ -28,6 +28,7 @@ void* CIE_Alloc(size_t siz) {
 #include "mod/mod.h"
 #include "mod/vehicle.h"
 #include "mod/pedestrian.h"
+#include "mod/luadev.h"
 
 // =======================================================================//
 // !
@@ -241,16 +242,35 @@ void mod_respawn() {
 // !
 // =======================================================================//
 
+static void mod_log_memory(const char *tag) {
+    MEMORYSTATUSEX ms; ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) {
+        mod_log("[mem] %s: %llu MB used of %llu MB virtual (%llu MB free)\n", tag,
+            (ms.ullTotalVirtual - ms.ullAvailVirtual) >> 20, ms.ullTotalVirtual >> 20, ms.ullAvailVirtual >> 20);
+    }
+}
+
 void m2o_module::init(M2::I_TickedModuleCallEventContext &) {
     mod_log("[GameModule]: EventGameInit\n");
+    {
+        auto base = (BYTE *)GetModuleHandle(NULL);
+        auto nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+        mod_log("[diag] mafia2.exe large-address-aware: %s\n",
+            (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) ? "yes" : "no");
+        mod_log_memory("init");
+    }
 
     // call late (post window create) platform-related code
     platform_init();
 
     // therotically we shouldn't call it here but because it's a
     // sync object it's fine itll work but the local player isn't created just yet.
+    mod_log("[diag] C_GuiGame instance: %p\n", (void *)M2::C_GuiGame::Get());
+    mod_log("[diag] calling StartGame(freeride)\n");
     M2::C_GuiGame::Get()->StartGame(M2::E_iLoadType::TYPE_NEW_GAME, 0, 1, "freeride", false);
+    mod_log("[diag] StartGame returned\n");
     M2::C_GameGuiModule::Get()->FaderFadeIn(1);
+    mod_log("[diag] FaderFadeIn done\n");
 
     ctx = new librg_ctx_t;
     zpl_zero_item(ctx);
@@ -266,6 +286,7 @@ void m2o_module::init(M2::I_TickedModuleCallEventContext &) {
     librg_option_set(LIBRG_PLATFORM_PROTOCOL, M2O_VERSION_PROTOCOL);
 
     librg_init(ctx);
+    mod_log("[diag] librg_init done\n");
     cef_init();
 
     /**
@@ -378,6 +399,7 @@ void m2o_module::init(M2::I_TickedModuleCallEventContext &) {
     m2o_car_callbacks_init();
 
     // discord_init();
+    mod_log("[diag] init finished\n");
 }
 
 void m2o_module::load_start(M2::I_TickedModuleCallEventContext &) {
@@ -398,6 +420,12 @@ void m2o_module::load_finish(M2::I_TickedModuleCallEventContext &) {
 void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
     mod.last_delta  = zpl_time_now() - mod.last_update;
     mod.last_update = zpl_time_now();
+
+    static bool first_tick_logged = false;
+    if (!first_tick_logged) { first_tick_logged = true; mod_log("[diag] first tick\n"); }
+
+    static f64 last_mem_log = 0;
+    if (mod.last_update - last_mem_log >= 2.0) { last_mem_log = mod.last_update; mod_log_memory("tick"); }
 
     // tick networking
     platform_tick();
@@ -426,8 +454,20 @@ void m2o_module::tick(M2::I_TickedModuleCallEventContext &) {
     if (input_key_down(VK_F5) && !mod.spawned) {
         std::string host; int port;
         mod_read_server_address(host, port);
+        mod_log("[diag] F5: connecting to %s:%d\n", host.c_str(), port);
         mod_connect(host.c_str(), port);
         mod.spawned = true;
+    }
+
+    /* dev: ask the server to spawn a synced car next to us (both players see it) */
+    if (input_key_down(VK_F10) && mod_connected()) {
+        mod_log("[diag] F10: requesting a car from the server\n");
+        mod_message_send(ctx, M2O_CAR_CREATE, nullptr);
+    }
+
+    /* dev: run binary/client/test.lua in the game's Lua VM */
+    if (input_key_down(VK_F8)) {
+        luadev_run_test_file();
     }
 
 

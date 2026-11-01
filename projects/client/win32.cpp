@@ -65,13 +65,16 @@ void platform_init() {
 
     mod_log("SDL_Init(SDL_INIT_VIDEO): %d %s", SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
     sdlwindow = SDL_CreateWindowFrom(mod_win32_hwnd);
+    mod_log("[diag] SDL_CreateWindowFrom: %p %s", (void *)sdlwindow, sdlwindow ? "" : SDL_GetError());
 
     std::string args(GetCommandLine());
-    args = args.substr(args.find("sid=")).substr(4);
-    // mod_log("args: %s", args.c_str());
+    mod_log("[diag] command line: %s", args.c_str());
+    size_t sid_pos = args.find("sid=");
+    args = (sid_pos != std::string::npos) ? args.substr(sid_pos + 4) : std::string();
 
-    // hide cursor initially
-    while (_input_state.hooked_showcursor(false) >= 0) {}
+    // hide cursor initially (bounded, so a misbehaving hook can't hang init)
+    for (int i = 0; i < 64 && _input_state.hooked_showcursor(false) >= 0; ++i) {}
+    mod_log("[diag] platform_init done");
 }
 
 void platform_tick() {
@@ -199,6 +202,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID lpReserved) {
 
             /* init vfs for file overrides */
             vfs_init();
+            vfs_dump_all(true); /* [diag] log every file the game opens */
             vfs_override_set("gui.sds",         (modpath + "\\files\\gui.sds").c_str());
             vfs_override_set("gui-main.sds",    (modpath + "\\files\\gui-main.sds").c_str()); 
             vfs_override_set("tables.sds",      (modpath + "\\files\\tables.sds").c_str());

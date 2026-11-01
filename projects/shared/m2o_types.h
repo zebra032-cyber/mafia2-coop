@@ -85,7 +85,10 @@ typedef struct m2o_ped {
         bool init;
         int counter;
         M2::C_Command *stand;
-        M2::C_Command *movedir;
+        M2::C_Command *movedir;     /* unused: hand-built command crashed the game, see pedestrian.h */
+        M2::C_SyncObject *move;     /* sync object returned by the game's ScrMoveV */
+        vec3 move_target;           /* last target we sent to ScrMoveV */
+        u8   move_mode;             /* last move mode we sent */
     } tasks;
 
     struct {

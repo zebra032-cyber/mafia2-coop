@@ -60,3 +60,13 @@ binary/other/*
 !binary/other/.keep
 !binary/other/pug.bmp
 !binary/other/m2o-2clients.exe
+
+# local test files
+*.patch
+build.log
+server.json
+/test.lua
+binary/client/test.lua
+binary/client/server.txt
+binary/client/debug.log
+binary/client/exceptions/
